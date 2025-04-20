@@ -1,0 +1,2 @@
+diretorio=C:/Users/JUNIOR/Desktop/projetos Junior/python/__pycache__
+paradas_ativas=

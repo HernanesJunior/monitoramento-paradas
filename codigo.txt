@@ -1,0 +1,406 @@
+import csv
+from datetime import datetime
+import tkinter as tk
+from tkinter import ttk, messagebox
+import os
+
+PARADAS_FILE = 'paradas.csv'
+PROCESSOS = ['Carregamento', 'Raku-Raku', 'Inspeção', 'Descarregamento']
+
+MOTIVOS_POR_PROCESSO = {
+    'Raku-Raku': [
+        'Falta de bandeja',
+        'Ligar Cabine',
+        'Acumulo de bandeja',
+        'Sincronismos',
+        'Alimentação',
+        'Engate',
+        'Falta de Dispositivos',
+        'Troca de Cor',
+        'Falha de Pistola Automática',
+        'Atraso Aspiração',
+        'Ar-condicionado Cabine',
+        'Troca de Pintor',
+        'Falha de Pistola Manual',
+        'Outros'
+    ],
+    'Carregamento': [
+        'Tempo de Pausa intervalos',
+        'Falta de peça',
+        'Temperatura Estufa',
+        'Mal Funcionamento Ebara',
+        'Falta de Espaço',
+        'Outros'
+    ],
+    'Inspeção': [
+        'Ajuste de Qualidade',
+        'Troca de Ferramenta',
+        'Problema de Medição',
+        'Retrabalho',
+        'Outros'
+    ],
+    'Descarregamento': [
+        'HG/ELO Empenado para Robô',
+        'Queda de HG na Célula do Robô',
+        'Sensor Robô Motoman',
+        'Sensor Robô Fanuc',
+        'Trans. Fora de Tempo para Robô',
+        'Power Free Parou',
+        'Falta de Sincronismo',
+        'Falha no Pega do Robô',
+        'Falha no Pega Robô Motoman',
+        'Acumulo de Bandeja no Robô',
+        'Trans. LSA Parou',
+        'Falha de Pistão/LS Power Free',
+        'Chassi Descendo Moldado',
+        'Outros'
+    ]
+}
+
+class ParadasApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Controle de Processos Industriais")
+        self.processo_selecionado = ""
+        self.paradas_em_andamento = []
+        self.motivo_selecionado = tk.StringVar()
+        
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
+        self.configurar_estilos()
+        
+        self.criar_tela_inicial()
+
+    def configurar_estilos(self):
+        self.style.configure('Titulo.TLabel', 
+                           font=('Arial', 16, 'bold'), 
+                           foreground='#2c3e50')
+        self.style.configure('BotaoProcesso.TButton', 
+                           font=('Arial', 14), 
+                           padding=20,
+                           width=15,
+                           foreground='white',
+                           background='#3498db')
+        self.style.map('BotaoProcesso.TButton',
+                     background=[('active', '#2980b9')])
+        self.style.configure('selected.TButton', 
+                           foreground='white', 
+                           background='#4CAF50')
+        self.style.configure('unselected.TButton', 
+                           foreground='black', 
+                           background='#f0f0f0')
+
+    def criar_tela_inicial(self):
+        self.limpar_tela()
+        
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
+        
+        ttk.Label(main_frame, 
+                text="Selecione o Processo", 
+                style='Titulo.TLabel').pack(pady=20)
+        
+        botoes_frame = ttk.Frame(main_frame)
+        botoes_frame.pack(expand=True)
+        
+        for i, processo in enumerate(PROCESSOS):
+            btn = ttk.Button(botoes_frame,
+                           text=processo,
+                           style='BotaoProcesso.TButton',
+                           command=lambda p=processo: self.selecionar_processo(p))
+            btn.grid(row=i//2, column=i%2, padx=10, pady=10, sticky='nsew')
+            
+        botoes_frame.grid_columnconfigure(0, weight=1)
+        botoes_frame.grid_columnconfigure(1, weight=1)
+        botoes_frame.grid_rowconfigure(0, weight=1)
+        botoes_frame.grid_rowconfigure(1, weight=1)
+
+    def selecionar_processo(self, processo):
+        self.processo_selecionado = processo
+        self.mostrar_interface_paradas()
+
+    def mostrar_interface_paradas(self):
+        self.limpar_tela()
+        
+        header_frame = ttk.Frame(self.root)
+        header_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(header_frame, 
+                 text="← Voltar", 
+                 command=self.criar_tela_inicial).pack(side=tk.LEFT)
+        
+        ttk.Label(header_frame, 
+                text=f"Processo: {self.processo_selecionado}", 
+                style='Titulo.TLabel').pack(side=tk.LEFT, padx=10)
+        
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        input_frame = ttk.LabelFrame(main_frame, text="Nova Parada")
+        input_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(input_frame, text="Funcionário:").grid(row=0, column=0, padx=5, pady=2, sticky='w')
+        self.funcionario_entry = ttk.Entry(input_frame)
+        self.funcionario_entry.grid(row=0, column=1, padx=5, pady=2, sticky='ew')
+
+        self.motivo_frame = ttk.LabelFrame(input_frame, text="Motivo da Parada")
+        self.motivo_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+        
+        for i in range(4):
+            self.motivo_frame.grid_columnconfigure(i, weight=1)
+
+        self.criar_botoes_motivo()
+
+        ttk.Button(input_frame, 
+                 text="Registrar Parada", 
+                 command=self.registrar_parada).grid(row=2, column=0, columnspan=2, pady=5, sticky='ew')
+
+        andamento_frame = ttk.LabelFrame(main_frame, text="Paradas em Andamento")
+        andamento_frame.pack(fill=tk.X, pady=5)
+
+        self.andamento_listbox = tk.Listbox(andamento_frame, height=5)
+        self.andamento_listbox.pack(padx=5, pady=2, fill=tk.BOTH, expand=True)
+        
+        ttk.Button(andamento_frame,
+                 text="Finalizar Parada Selecionada", 
+                 command=self.finalizar_parada).pack(pady=5)
+
+        historico_frame = ttk.LabelFrame(main_frame, text="Histórico de Paradas")
+        historico_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        columns = ('Processo', 'Funcionário', 'Motivo', 'Início', 'Fim', 'Duração (min)')
+        self.historico_tree = ttk.Treeview(historico_frame, columns=columns, show='headings', height=5)
+        
+        for col in columns:
+            self.historico_tree.heading(col, text=col)
+            self.historico_tree.column(col, width=100, anchor='center')
+
+        self.historico_tree.column('Processo', width=120)
+        self.historico_tree.column('Funcionário', width=120)
+        self.historico_tree.column('Motivo', width=150)
+        self.historico_tree.column('Início', width=140)
+        self.historico_tree.column('Fim', width=140)
+        
+        scroll = ttk.Scrollbar(historico_frame, orient=tk.VERTICAL, command=self.historico_tree.yview)
+        self.historico_tree.configure(yscroll=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.historico_tree.pack(fill=tk.BOTH, expand=True)
+
+        relatorio_frame = ttk.LabelFrame(main_frame, text="Relatório")
+        relatorio_frame.pack(fill=tk.X, pady=5)
+
+        btn_frame = ttk.Frame(relatorio_frame)
+        btn_frame.pack(pady=5)
+        
+        ttk.Button(btn_frame, 
+                 text="Atualizar Relatório", 
+                 command=self.gerar_relatorio).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(btn_frame, 
+                 text="Apagar Relatório", 
+                 command=self.apagar_relatorio).pack(side=tk.LEFT, padx=5)
+
+        self.relatorio_label = ttk.Label(relatorio_frame, text="")
+        self.relatorio_label.pack(pady=5)
+
+        self.carregar_historico()
+
+    def criar_botoes_motivo(self):
+        for widget in self.motivo_frame.winfo_children():
+            widget.destroy()
+            
+        self.botoes_motivo = []
+        self.outros_entry = None
+        motivos = MOTIVOS_POR_PROCESSO.get(self.processo_selecionado, [])
+        motivos_principais = [m for m in motivos if m != 'Outros']
+        tem_outros = 'Outros' in motivos
+
+        for i, motivo in enumerate(motivos_principais):
+            row = i // 4
+            col = i % 4
+            btn = ttk.Button(self.motivo_frame,
+                           text=motivo,
+                           style='unselected.TButton',
+                           command=lambda m=motivo: self.selecionar_motivo(m))
+            btn.grid(row=row, column=col, padx=2, pady=2, sticky='ew')
+            self.botoes_motivo.append(btn)
+
+        if tem_outros:
+            total_botoes = len(motivos_principais)
+            row_outros = (total_botoes // 4) + 1
+            btn_outros = ttk.Button(self.motivo_frame,
+                                  text='Outros',
+                                  style='unselected.TButton',
+                                  command=lambda: self.selecionar_motivo('Outros'))
+            btn_outros.grid(row=row_outros, column=0, columnspan=4, padx=2, pady=2, sticky='ew')
+            self.botoes_motivo.append(btn_outros)
+            
+            self.outros_entry = ttk.Entry(self.motivo_frame, width=20, state='disabled')
+            self.outros_entry.grid(row=row_outros+1, column=0, columnspan=4, padx=2, pady=2, sticky='ew')
+
+    def selecionar_motivo(self, motivo):
+        for btn in self.botoes_motivo:
+            btn.configure(style='unselected.TButton')
+        
+        for btn in self.botoes_motivo:
+            if btn['text'] == motivo:
+                btn.configure(style='selected.TButton')
+                self.motivo_selecionado.set(motivo)
+                break
+                
+        if motivo == 'Outros' and self.outros_entry:
+            self.outros_entry.config(state='normal')
+            self.outros_entry.focus()
+        elif self.outros_entry:
+            self.outros_entry.config(state='disabled')
+            self.outros_entry.delete(0, tk.END)
+
+    def registrar_parada(self):
+        funcionario = self.funcionario_entry.get().strip()
+        motivo = self.motivo_selecionado.get()
+        
+        if motivo == 'Outros' and self.outros_entry:
+            motivo = self.outros_entry.get().strip()
+            if not motivo:
+                messagebox.showwarning("Campo Vazio", "Digite o motivo personalizado!")
+                return
+        
+        if not all([funcionario, motivo]):
+            messagebox.showwarning("Campos Vazios", "Preencha todos os campos obrigatórios!")
+            return
+            
+        nova_parada = {
+            'funcionario': funcionario,
+            'motivo': motivo,
+            'inicio': datetime.now(),
+            'fim': None,
+            'duracao': None
+        }
+        
+        self.paradas_em_andamento.append(nova_parada)
+        self.atualizar_lista_paradas()
+        self.limpar_campos()
+        messagebox.showinfo("Sucesso", "Parada registrada com sucesso!")
+
+    def limpar_campos(self):
+        self.funcionario_entry.delete(0, tk.END)
+        self.motivo_selecionado.set('')
+        if self.outros_entry:
+            self.outros_entry.delete(0, tk.END)
+            self.outros_entry.config(state='disabled')
+        for btn in self.botoes_motivo:
+            btn.configure(style='unselected.TButton')
+
+    def finalizar_parada(self):
+        if not self.paradas_em_andamento:
+            messagebox.showwarning("Nenhuma Parada", "Não há paradas em andamento!")
+            return
+            
+        try:
+            index = self.andamento_listbox.curselection()[0]
+        except IndexError:
+            messagebox.showwarning("Nenhuma Seleção", "Selecione uma parada na lista!")
+            return
+            
+        parada = self.paradas_em_andamento.pop(index)
+        parada = self.calcular_duracao(parada)
+        self.salvar_parada(parada)
+        self.atualizar_lista_paradas()
+        self.carregar_historico()
+        messagebox.showinfo("Sucesso", f"Parada finalizada!\nDuração: {parada['duracao']:.2f} minutos")
+
+    def calcular_duracao(self, parada):
+        parada['fim'] = datetime.now()
+        duracao = parada['fim'] - parada['inicio']
+        parada['duracao'] = duracao.total_seconds() / 60
+        return parada
+
+    def salvar_parada(self, parada):
+        with open(PARADAS_FILE, 'a', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow([
+                self.processo_selecionado,
+                parada['funcionario'],
+                parada['motivo'],
+                parada['inicio'].strftime('%Y-%m-%d %H:%M:%S'),
+                parada['fim'].strftime('%Y-%m-%d %H:%M:%S'),
+                f"{parada['duracao']:.2f}"
+            ])
+
+    def carregar_historico(self):
+        try:
+            with open(PARADAS_FILE, 'r', newline='', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                dados = list(reader)
+        except FileNotFoundError:
+            dados = []
+            
+        self.historico_tree.delete(*self.historico_tree.get_children())
+        for linha in dados:
+            self.historico_tree.insert('', tk.END, values=linha)
+
+    def atualizar_lista_paradas(self):
+        self.andamento_listbox.delete(0, tk.END)
+        for parada in self.paradas_em_andamento:
+            texto = f"{parada['funcionario']} - {parada['motivo']} ({parada['inicio'].strftime('%H:%M:%S')})"
+            self.andamento_listbox.insert(tk.END, texto)
+
+    def gerar_relatorio(self):
+        try:
+            with open(PARADAS_FILE, 'r', newline='', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                dados = list(reader)
+        except FileNotFoundError:
+            dados = []
+        
+        dados_validos = []
+        for r in dados:
+            if len(r) == 6 and r[5].replace('.', '', 1).isdigit():
+                dados_validos.append(r)
+        
+        total_paradas = len(dados_validos)
+        
+        try:
+            total_minutos = sum(float(r[5]) for r in dados_validos)
+            media = total_minutos / total_paradas if total_paradas > 0 else 0
+        except:
+            total_minutos = 0
+            media = 0
+        
+        relatorio = (f"Total de paradas: {total_paradas}\n"
+                   f"Tempo total de paradas: {total_minutos:.2f} minutos\n"
+                   f"Média por parada: {media:.2f} minutos" if total_paradas > 0 
+                   else "Nenhuma parada registrada")
+        
+        self.relatorio_label.config(text=relatorio)
+
+    def apagar_relatorio(self):
+        if not os.path.exists(PARADAS_FILE):
+            messagebox.showinfo("Informação", "Não há dados para apagar!")
+            return
+
+        resposta = messagebox.askyesno(
+            "Confirmar",
+            "Tem certeza que deseja apagar TODOS os registros?\nEsta ação é irreversível!",
+            icon='warning'
+        )
+        
+        if resposta:
+            try:
+                os.remove(PARADAS_FILE)
+                self.carregar_historico()
+                self.gerar_relatorio()
+                self.paradas_em_andamento.clear()
+                self.atualizar_lista_paradas()
+                messagebox.showinfo("Sucesso", "Todos os registros foram apagados!")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Falha ao apagar arquivo:\n{str(e)}")
+
+    def limpar_tela(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ParadasApp(root)
+    root.mainloop()
