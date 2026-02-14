@@ -54,6 +54,10 @@ class AplicativoMobile(ctk.CTk):
         super().__init__()
         self.title("Controle de Paradas")
         self.geometry("360x540")
+        # permitir redimensionamento para melhor usabilidade em telas maiores
+        self.minsize(360, 540)
+        self.maxsize(800, 800)
+        self.resizable(True, True)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -90,11 +94,21 @@ class AplicativoMobile(ctk.CTk):
                     pass
 
     def carregar_config(self):
+        # garante que a configuração sempre contenha as chaves esperadas
+        defaults = {
+            'diretorio': DIRETORIO_PADRAO,
+            'remember_me': False,
+            'last_user': ''
+        }
         try:
             with open(ARQUIVO_CONFIG, 'r') as f:
-                return json.load(f)
+                cfg = json.load(f)
+                # mescla defaults com os valores existentes
+                for k, v in defaults.items():
+                    cfg.setdefault(k, v)
+                return cfg
         except (FileNotFoundError, json.JSONDecodeError):
-            return {'diretorio': DIRETORIO_PADRAO}
+            return defaults
 
     def salvar_config(self):
         with open(ARQUIVO_CONFIG, 'w') as f:
@@ -162,21 +176,38 @@ class AplicativoMobile(ctk.CTk):
         ctk.CTkLabel(self, text="Operador:", font=self.font_texto, text_color="#d3d3d3").pack(pady=10)
 
         self.entry_nome_operador = ctk.CTkEntry(self, placeholder_text='Digite seu usuário:')
-        self.entry_nome_operador.pack(pady=10, ipady=8, padx=20, fill='x') # Adicionado padx
+        self.entry_nome_operador.pack(pady=10, ipady=8, padx=20, fill='x')
         self.entry_nome_operador.focus()
 
         ctk.CTkLabel(self, text='Senha', font=self.font_texto, text_color="#d3d3d3").pack(pady=10)
 
         self.entry_senha_funcionario = ctk.CTkEntry(self, placeholder_text='Digite sua senha:', show="*")
-        self.entry_senha_funcionario.pack(pady=10, ipady=8, padx=20, fill='x') # Adicionado padx
-        self.entry_senha_funcionario.focus()
+        self.entry_senha_funcionario.pack(pady=10, ipady=8, padx=20, fill='x')
 
-        checkbox = ctk.CTkCheckBox(self, text='Lembrar senha')
+        # checkbox para mostrar/ocultar senha
+        self.show_password_var = ctk.BooleanVar(value=False)
+        chk_show = ctk.CTkCheckBox(self, text='Mostrar senha', variable=self.show_password_var, command=self._toggle_password_visibility)
+        chk_show.pack(pady=5)
+
+        # lembrar senha / usuário
+        self.remember_var = ctk.BooleanVar(value=self.config.get('remember_me', False))
+        checkbox = ctk.CTkCheckBox(self, text='Lembrar usuário', variable=self.remember_var)
         checkbox.pack(padx=10, pady=10)
 
-        ctk.CTkButton(self, text="Entrar", command=self.verificar_nome, height=50, font=self.font_botao).pack(pady=20, padx=20, fill='x')# Adicionado padx
+        ctk.CTkButton(self, text="Entrar", command=self.verificar_nome, height=50, font=self.font_botao).pack(pady=20, padx=20, fill='x')
         self.label_resultado_login = ctk.CTkLabel(self, text='')
         self.label_resultado_login.pack(pady=5)
+
+        # preencher campos se havia usuário lembrado
+        if self.config.get('remember_me'):
+            self.entry_nome_operador.insert(0, self.config.get('last_user', ''))
+
+    def _toggle_password_visibility(self):
+        # alterna entre mostrar e ocultar o conteúdo da senha
+        if self.show_password_var.get():
+            self.entry_senha_funcionario.configure(show="")
+        else:
+            self.entry_senha_funcionario.configure(show="*")
 
     def verificar_nome(self):
         nome = self.entry_nome_operador.get().strip()
@@ -184,6 +215,14 @@ class AplicativoMobile(ctk.CTk):
         if nome == 'operador' and senha == '123':
             self.label_resultado_login.configure(text="Login bem-sucedido!", text_color="green")
             self.nome_funcionario.set(nome) # Define o nome do funcionário
+            # salvar preferências de usuário
+            if self.remember_var.get():
+                self.config['remember_me'] = True
+                self.config['last_user'] = nome
+            else:
+                self.config['remember_me'] = False
+                self.config['last_user'] = ''
+            self.salvar_config()
             self.after(1500, self.criar_tela_processos) # Redireciona após um breve delay
         else:
             self.label_resultado_login.configure(text="Nome ou senha incorretos!", text_color="red")
@@ -191,15 +230,28 @@ class AplicativoMobile(ctk.CTk):
     def criar_tela_processos(self):
         self.limpar_tela()
 
+        # container rolável para processar muitos botões se necessário
         container = ctk.CTkFrame(self)
-        container.pack(expand=True, fill='both', padx=15, pady=15) # Aumentei padx e pady
-        container.columnconfigure(0, weight=1)
-        container.columnconfigure(1, weight=1)
+        container.pack(expand=True, fill='both', padx=15, pady=15)
+        canvas = ctk.CTkCanvas(container, highlightthickness=0)
+        scrollbar = ctk.CTkScrollbar(container, orientation='vertical', command=canvas.yview)
+        scroll_frame = ctk.CTkFrame(canvas)
+        scroll_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        scroll_frame.columnconfigure(0, weight=1)
+        scroll_frame.columnconfigure(1, weight=1)
 
         for i, processo in enumerate(PROCESSOS):
-            btn = ctk.CTkButton(container, text=processo, font=self.font_botao, text_color=self.cor_botao_texto, fg_color=self.cor_principal, hover_color="#2980b9", command=lambda p=processo: self.selecionar_processo(p))
+            btn = ctk.CTkButton(scroll_frame, text=processo, font=self.font_botao, text_color=self.cor_botao_texto, fg_color=self.cor_principal, hover_color="#2980b9", command=lambda p=processo: self.selecionar_processo(p))
             btn.grid(row=i//2, column=i%2, padx=5, pady=5, sticky='nsew')
-            btn.configure(width=150, height=50) # Aumentei a altura dos botões
+            btn.configure(width=150, height=50)
+
+        self.criar_status_bar()
+        self.atualizar_status_bar()
 
         rodape = ctk.CTkFrame(self, fg_color=self.cor_card)
         rodape.pack(fill='x', padx=15, pady=15) # Aumentei padx e pady
@@ -258,10 +310,14 @@ class AplicativoMobile(ctk.CTk):
         }
 
         self.paradas_em_andamento.append(nova_parada)
+        self.criar_status_bar()
+        self.atualizar_status_bar()
         self.mostrar_paradas_ativas()
 
     def mostrar_paradas_ativas(self):
         self.limpar_tela()
+        self.criar_status_bar()
+        self.atualizar_status_bar()
 
         cabecalho = ctk.CTkFrame(self, fg_color=self.cor_card)
         cabecalho.pack(fill='x', padx=10, pady=10)
@@ -311,6 +367,8 @@ class AplicativoMobile(ctk.CTk):
         self.paradas_em_andamento.remove(parada)
         self.salvar_paradas_ativas()
         self.mostrar_paradas_ativas()
+        # atualiza barra de status após finalizar
+        self.atualizar_status_bar()
 
     def salvar_parada_historico(self, parada):
         arquivo_excel = self.caminho_arquivo('paradas.xlsx')
@@ -359,6 +417,8 @@ class AplicativoMobile(ctk.CTk):
 
     def mostrar_historico(self):
         self.limpar_tela()
+        self.criar_status_bar()
+        self.atualizar_status_bar()
 
         tabview = ctk.CTkTabview(self)
         tabview.pack(expand=True, fill='both', padx=10, pady=10)
@@ -563,6 +623,22 @@ class AplicativoMobile(ctk.CTk):
 
         btn_selecionar_diretorio = ctk.CTkButton(tela_config, text="Alterar Diretório", command=self.selecionar_diretorio)
         btn_selecionar_diretorio.pack(pady=10)
+
+    def criar_status_bar(self):
+        # adiciona barra de status na parte inferior da janela
+        if hasattr(self, 'status_bar') and self.status_bar.winfo_exists():
+            return
+        self.status_bar = ctk.CTkLabel(self, text="", font=self.font_texto, fg_color=self.cor_card, anchor='w')
+        self.status_bar.pack(side='bottom', fill='x')
+
+    def atualizar_status_bar(self):
+        # mostra número de paradas ativas e usuário logado
+        try:
+            count = len(self.paradas_em_andamento)
+            user = self.nome_funcionario.get()
+            self.status_bar.configure(text=f"Paradas ativas: {count} • Usuário: {user}")
+        except Exception:
+            pass
 
     def ao_fechar(self):
         self.salvar_paradas_ativas()
